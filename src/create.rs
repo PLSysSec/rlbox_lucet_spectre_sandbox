@@ -13,6 +13,7 @@ use std::sync::Arc;
 #[no_mangle]
 pub extern "C" fn lucet_ensure_linked() {
     lucet_runtime::lucet_internal_ensure_linked();
+    lucet_wasi::export_wasi_funcs();
 }
 
 #[no_mangle]

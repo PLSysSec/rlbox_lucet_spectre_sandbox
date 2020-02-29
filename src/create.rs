@@ -77,7 +77,11 @@ fn lucet_load_module_helper(module_path: &String, allow_stdio: bool) -> Result<L
         builder = builder.inherit_stdio();
     }
 
-    let ctx = builder.build()?;
+    let ctx_temp = builder.build();
+    if ctx_temp.is_err() {
+        panic!("Could not create wasi ctx!");
+    }
+    let ctx = ctx_temp.unwrap();
 
     let instance_handle = region
         .new_instance_builder(module as Arc<dyn Module>)

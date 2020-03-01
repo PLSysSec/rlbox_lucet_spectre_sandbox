@@ -169,7 +169,7 @@ WORKING_DIRECTORY ${LUCET_SOURCE_DIR}
 COMMENT "Building customized lucet compiler")
 add_custom_target(lucet_release ALL DEPENDS ${LUCET_PATH})
 
-file(GLOB_RECURSE RUST_SOURCE_FILES src/*.rs)
+file(GLOB_RECURSE RUST_SOURCE_FILES ${CMAKE_SOURCE_DIR}/src/*.rs)
 
 set(RUST_LIB_DEBUG_PATH
     "${CMAKE_BINARY_DIR}/cargo/debug/librlbox_lucet_sandbox.a")

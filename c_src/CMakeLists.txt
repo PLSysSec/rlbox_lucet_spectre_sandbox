@@ -62,6 +62,10 @@ add_custom_command(OUTPUT ${GLUE_LIB_PATH}
                            "4GiB"
                            --max-reserved-size
                            "4GiB"
+                           --spectre-mitigations-enable
+                           --pinned-heap-reg
+                           --pinned-control-flow
+                           --spectre-callbacks-workaround
                            glue_lib_lucet.wasm
                            -o
                            ${GLUE_LIB_PATH}

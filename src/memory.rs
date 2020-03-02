@@ -14,6 +14,13 @@ pub extern "C" fn lucet_get_heap_base(inst_ptr: *mut c_void) -> *mut c_void {
 }
 
 #[no_mangle]
+pub extern "C" fn lucet_get_cs_base(inst_ptr: *mut c_void) -> *const c_void {
+    let inst = unsafe { &mut *(inst_ptr as *mut LucetSandboxInstance) };
+    let code_segment = inst.instance_handle.module().get_code_segment();
+    return code_segment;
+}
+
+#[no_mangle]
 pub extern "C" fn lucet_get_heap_size(inst_ptr: *mut c_void) -> usize {
     let inst = unsafe { &mut *(inst_ptr as *mut LucetSandboxInstance) };
     let heap_view = inst.instance_handle.heap_mut();

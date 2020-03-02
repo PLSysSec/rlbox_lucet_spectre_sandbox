@@ -237,6 +237,7 @@ public:
 private:
   LucetSandboxInstance* sandbox = nullptr;
   uintptr_t heap_base;
+  uintptr_t code_base;
   void* malloc_index = 0;
   void* free_index = 0;
   size_t return_slot_size = 0;
@@ -378,6 +379,9 @@ private:
     void* /* vmContext */,
     typename lucet_detail::convert_type_to_wasm_type<T_Args>::type... params)
   {
+    // Callback entry - Stop speculation cross boundary
+    // have to lfence and reset register pinning at the end of the callback, this is done in the rlbox repo
+    asm("lfence");
 #ifdef RLBOX_EMBEDDER_PROVIDES_TLS_STATIC_VARIABLES
     auto& thread_data = *get_rlbox_lucet_sandbox_thread_data();
 #endif
@@ -391,7 +395,36 @@ private:
     // Callbacks are invoked through function pointers, cannot use std::forward
     // as we don't have caller context for T_Args, which means they are all
     // effectively passed by value
-    return func(thread_data.sandbox->serialize_to_sandbox<T_Args>(params)...);
+    uint64_t pinned_heap, pinned_cf;
+    uint64_t heap_base = thread_data.sandbox->heap_base;
+    uint64_t code_base = thread_data.sandbox->code_base;
+    if constexpr(std::is_void_v<T_Ret>) {
+      func(thread_data.sandbox->serialize_to_sandbox<T_Args>(params)...);
+      asm(
+        "mov %1, %%r15\n\t"
+        "mov %0, %%r14\n\t"
+        "lfence\n\t"
+        : "=r"(pinned_heap), "=r"(pinned_cf) // output
+        : "r"(heap_base)   , "r"(code_base)  // input
+        : "%r15"           , "%r14"          // clobbered
+      );
+      RLBOX_LUCET_UNUSED(pinned_heap);
+      RLBOX_LUCET_UNUSED(pinned_cf);
+      return;
+    } else {
+      auto ret = func(thread_data.sandbox->serialize_to_sandbox<T_Args>(params)...);
+      asm(
+        "mov %1, %%r15\n\t"
+        "mov %0, %%r14\n\t"
+        "lfence\n\t"
+        : "=r"(pinned_heap), "=r"(pinned_cf) // output
+        : "r"(heap_base)   , "r"(code_base)  // input
+        : "%r15"           , "%r14"          // clobbered
+      );
+      RLBOX_LUCET_UNUSED(pinned_heap);
+      RLBOX_LUCET_UNUSED(pinned_cf);
+      return ret;
+    }
   }
 
   template<uint32_t N, typename T_Ret, typename... T_Args>
@@ -400,6 +433,9 @@ private:
     typename lucet_detail::convert_type_to_wasm_type<T_Ret>::type ret,
     typename lucet_detail::convert_type_to_wasm_type<T_Args>::type... params)
   {
+    // Callback entry - Stop speculation cross boundary
+    // have to lfence and reset register pinning at the end of the callback, this is done in the rlbox repo
+    asm("lfence");
 #ifdef RLBOX_EMBEDDER_PROVIDES_TLS_STATIC_VARIABLES
     auto& thread_data = *get_rlbox_lucet_sandbox_thread_data();
 #endif
@@ -419,6 +455,20 @@ private:
     auto ret_ptr = reinterpret_cast<T_Ret*>(
       thread_data.sandbox->template impl_get_unsandboxed_pointer<T_Ret*>(ret));
     *ret_ptr = ret_val;
+
+    uint64_t pinned_heap, pinned_cf;
+    uint64_t heap_base = thread_data.sandbox->heap_base;
+    uint64_t code_base = thread_data.sandbox->code_base;
+    asm(
+      "mov %1, %%r15\n\t"
+      "mov %0, %%r14\n\t"
+      "lfence\n\t"
+      : "=r"(pinned_heap), "=r"(pinned_cf) // output
+      : "r"(heap_base)   , "r"(code_base)  // input
+      : "%r15"           , "%r14"          // clobbered
+    );
+    RLBOX_LUCET_UNUSED(pinned_heap);
+    RLBOX_LUCET_UNUSED(pinned_cf);
   }
 
   template<typename T_Ret, typename... T_Args>
@@ -483,6 +533,7 @@ protected:
     detail::dynamic_check(sandbox != nullptr, "Sandbox could not be created");
 
     heap_base = reinterpret_cast<uintptr_t>(impl_get_memory_location());
+    code_base = reinterpret_cast<uintptr_t>(impl_get_code_location());
     // Check that the address space is larger than the sandbox heap i.e. 4GB
     // sandbox heap, host has to have more than 4GB
     static_assert(sizeof(uintptr_t) > sizeof(T_PointerType));
@@ -648,6 +699,13 @@ protected:
     return lucet_get_heap_base(sandbox);
   }
 
+  inline void* impl_get_code_location()
+  {
+    auto code_ptr = reinterpret_cast<uintptr_t>(lucet_get_cs_base(sandbox));
+    void* ret = reinterpret_cast<void*>(code_ptr >> 32);
+    return ret;
+  }
+
   void* impl_lookup_symbol(const char* func_name)
   {
     return lucet_lookup_function(sandbox, func_name);
@@ -738,12 +796,28 @@ protected:
       std::conditional_t<std::is_void_v<T_Ret>, uint32_t, T_Ret>;
     T_NoVoidRet ret;
 
+    // Function call entry - Stop speculation cross boundary and setup register pinning
+    uint64_t pinned_heap, pinned_cf;
+    asm(
+      "lfence\n\t"
+      "mov %1, %%r15\n\t"
+      "mov %0, %%r14\n\t"
+      : "=r"(pinned_heap), "=r"(pinned_cf) // output
+      : "r"(heap_base)   , "r"(code_base)  // input
+      : "%r15"           , "%r14"          // clobbered
+    );
+
     if constexpr (std::is_void_v<T_Ret>) {
       RLBOX_LUCET_UNUSED(ret);
       func_ptr_conv(heap_base, serialize_class_arg(params)...);
     } else {
       ret = func_ptr_conv(heap_base, serialize_class_arg(params)...);
     }
+
+    RLBOX_LUCET_UNUSED(pinned_heap);
+    RLBOX_LUCET_UNUSED(pinned_cf);
+    // Function call exit - Stop speculation cross boundary
+    asm("lfence");
 
     for (size_t i = 0; i < alloc_length; i++) {
       impl_free_in_sandbox(allocations_buff[i]);

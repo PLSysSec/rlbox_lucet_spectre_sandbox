@@ -6,6 +6,9 @@ project(rlbox_lucet
 
 # Project Settings ###################
 
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -falign-functions=32")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -falign-functions=32")
+
 # set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -79,13 +82,15 @@ endif()
 
 include(FetchContent)
 
-FetchContent_Declare(
-  rlbox
-  GIT_REPOSITORY https://github.com/PLSysSec/rlbox_api_cpp17.git)
-FetchContent_GetProperties(rlbox)
-if(NOT rlbox_POPULATED)
-  FetchContent_Populate(rlbox)
-endif()
+# FetchContent_Declare(
+#   rlbox
+#   GIT_REPOSITORY https://github.com/PLSysSec/rlbox_api_cpp17.git)
+# FetchContent_GetProperties(rlbox)
+# if(NOT rlbox_POPULATED)
+#   FetchContent_Populate(rlbox)
+# endif()
+
+set(rlbox_SOURCE_DIR "${CMAKE_SOURCE_DIR}/../rlbox_spectre_sandboxing_api")
 
 FetchContent_Declare(catch2
                      GIT_REPOSITORY https://github.com/catchorg/Catch2.git

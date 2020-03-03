@@ -395,34 +395,15 @@ private:
     // Callbacks are invoked through function pointers, cannot use std::forward
     // as we don't have caller context for T_Args, which means they are all
     // effectively passed by value
-    uint64_t pinned_heap, pinned_cf;
-    uint64_t heap_base = thread_data.sandbox->heap_base;
-    uint64_t code_base = thread_data.sandbox->code_base;
     if constexpr(std::is_void_v<T_Ret>) {
       func(thread_data.sandbox->serialize_to_sandbox<T_Args>(params)...);
-      asm(
-        "mov %1, %%r15\n\t"
-        "mov %0, %%r14\n\t"
-        "lfence\n\t"
-        : "=r"(pinned_heap), "=r"(pinned_cf) // output
-        : "r"(heap_base)   , "r"(code_base)  // input
-        : "%r15"           , "%r14"          // clobbered
-      );
-      RLBOX_LUCET_UNUSED(pinned_heap);
-      RLBOX_LUCET_UNUSED(pinned_cf);
+      // r14, r15 are callee saved and are restored anyway
+      asm("lfence");
       return;
     } else {
       auto ret = func(thread_data.sandbox->serialize_to_sandbox<T_Args>(params)...);
-      asm(
-        "mov %1, %%r15\n\t"
-        "mov %0, %%r14\n\t"
-        "lfence\n\t"
-        : "=r"(pinned_heap), "=r"(pinned_cf) // output
-        : "r"(heap_base)   , "r"(code_base)  // input
-        : "%r15"           , "%r14"          // clobbered
-      );
-      RLBOX_LUCET_UNUSED(pinned_heap);
-      RLBOX_LUCET_UNUSED(pinned_cf);
+      // r14, r15 are callee saved and are restored anyway
+      asm("lfence");
       return ret;
     }
   }
@@ -456,19 +437,8 @@ private:
       thread_data.sandbox->template impl_get_unsandboxed_pointer<T_Ret*>(ret));
     *ret_ptr = ret_val;
 
-    uint64_t pinned_heap, pinned_cf;
-    uint64_t heap_base = thread_data.sandbox->heap_base;
-    uint64_t code_base = thread_data.sandbox->code_base;
-    asm(
-      "mov %1, %%r15\n\t"
-      "mov %0, %%r14\n\t"
-      "lfence\n\t"
-      : "=r"(pinned_heap), "=r"(pinned_cf) // output
-      : "r"(heap_base)   , "r"(code_base)  // input
-      : "%r15"           , "%r14"          // clobbered
-    );
-    RLBOX_LUCET_UNUSED(pinned_heap);
-    RLBOX_LUCET_UNUSED(pinned_cf);
+    // r14, r15 are callee saved and are restored anyway
+    asm("lfence");
   }
 
   template<typename T_Ret, typename... T_Args>
@@ -797,14 +767,20 @@ protected:
     T_NoVoidRet ret;
 
     // Function call entry - Stop speculation cross boundary and setup register pinning
-    uint64_t pinned_heap, pinned_cf;
+    uint64_t old_r14, old_r15;
     asm(
+      "mov %%r14, %[old_r14]\n\t"
+      "mov %%r15, %[old_r15]\n\t"
+      : [old_r14] "=r"(old_r14), [old_r15] "=r"(old_r15) // output
+    );
+
+    asm volatile(
+      "mov %0, %%r15\n\t"
+      "mov %1, %%r14\n\t"
       "lfence\n\t"
-      "mov %1, %%r15\n\t"
-      "mov %0, %%r14\n\t"
-      : "=r"(pinned_heap), "=r"(pinned_cf) // output
-      : "r"(heap_base)   , "r"(code_base)  // input
-      : "%r15"           , "%r14"          // clobbered
+      :
+      : "r"(heap_base)         , "r"(code_base)          // input
+      : "%r15"                 , "%r14"                  // clobbered
     );
 
     if constexpr (std::is_void_v<T_Ret>) {
@@ -814,10 +790,17 @@ protected:
       ret = func_ptr_conv(heap_base, serialize_class_arg(params)...);
     }
 
-    RLBOX_LUCET_UNUSED(pinned_heap);
-    RLBOX_LUCET_UNUSED(pinned_cf);
-    // Function call exit - Stop speculation cross boundary
-    asm("lfence");
+    // Function call exit - Stop speculation cross boundary and restore registers
+    asm(
+      "lfence\n\t"
+      "mov %1, %%r14\n\t"
+      "mov %0, %%r15\n\t"
+      :                                                // output
+      : [old_r15] "r"(old_r15), [old_r14] "r"(old_r14) // input
+      :                                                // clobbered
+    );
+    // while the above snippet techinically modifies r14 and r15 it does so to restore old values
+    // thus it is not really an output/clobber
 
     for (size_t i = 0; i < alloc_length; i++) {
       impl_free_in_sandbox(allocations_buff[i]);

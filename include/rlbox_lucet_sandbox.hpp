@@ -681,6 +681,37 @@ protected:
     return lucet_lookup_function(sandbox, func_name);
   }
 
+  // Using inline assembly which manipulates registers can go wrong pretty easily
+  // For instance if the below function is inlined into a parent function, there
+  // can be writes to r15, r14 after the inline assembly before the call
+  // With the old register keyword, this was easier to control, but this is
+  // deprecated and not well supported
+  // Instead we use don't inline to reduce the odds that something goes wrong
+  template<typename T_Ret, typename T, typename... T_Args>
+  auto __attribute__ ((noinline)) invoke_with_fences(T* func_ptr, T_Args&&... params) {
+    // Function call entry - Stop speculation cross boundary and setup register pinning
+    asm volatile(
+    "mov %[heap_base], %%r15\n\t"
+    "mov %[code_base], %%r14\n\t"
+    "lfence\n\t"
+    : // output
+    : [heap_base] "rm"(heap_base), [code_base] "rm"(code_base)     // input
+    :  "%r15", "%r14" // clobbered
+    );
+
+    if constexpr (std::is_void_v<T_Ret>) {
+      func_ptr(params...);
+      // Function call exit - Stop speculation cross boundary and restore registers
+      asm("lfence");
+      return;
+    } else {
+      auto ret = func_ptr(params...);
+      // Function call exit - Stop speculation cross boundary and restore registers
+      asm("lfence");
+      return ret;
+    }
+  }
+
   template<typename T, typename T_Converted, typename... T_Args>
   auto impl_invoke_with_func_ptr(T_Converted* func_ptr, T_Args&&... params)
   {
@@ -766,41 +797,12 @@ protected:
       std::conditional_t<std::is_void_v<T_Ret>, uint32_t, T_Ret>;
     T_NoVoidRet ret;
 
-    // Function call entry - Stop speculation cross boundary and setup register pinning
-    uint64_t old_r14, old_r15;
-    asm(
-      "mov %%r14, %[old_r14]\n\t"
-      "mov %%r15, %[old_r15]\n\t"
-      : [old_r14] "=r"(old_r14), [old_r15] "=r"(old_r15) // output
-    );
-
-    asm volatile(
-      "mov %0, %%r15\n\t"
-      "mov %1, %%r14\n\t"
-      "lfence\n\t"
-      :
-      : "r"(heap_base)         , "r"(code_base)          // input
-      : "%r15"                 , "%r14"                  // clobbered
-    );
-
     if constexpr (std::is_void_v<T_Ret>) {
       RLBOX_LUCET_UNUSED(ret);
-      func_ptr_conv(heap_base, serialize_class_arg(params)...);
+      invoke_with_fences<T_Ret>(func_ptr_conv, heap_base, serialize_class_arg(params)...);
     } else {
-      ret = func_ptr_conv(heap_base, serialize_class_arg(params)...);
+      ret = invoke_with_fences<T_Ret>(func_ptr_conv, heap_base, serialize_class_arg(params)...);
     }
-
-    // Function call exit - Stop speculation cross boundary and restore registers
-    asm(
-      "lfence\n\t"
-      "mov %1, %%r14\n\t"
-      "mov %0, %%r15\n\t"
-      :                                                // output
-      : [old_r15] "r"(old_r15), [old_r14] "r"(old_r14) // input
-      :                                                // clobbered
-    );
-    // while the above snippet techinically modifies r14 and r15 it does so to restore old values
-    // thus it is not really an output/clobber
 
     for (size_t i = 0; i < alloc_length; i++) {
       impl_free_in_sandbox(allocations_buff[i]);

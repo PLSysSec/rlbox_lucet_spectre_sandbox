@@ -65,7 +65,7 @@ add_custom_command(OUTPUT ${GLUE_LIB_PATH}
                            --spectre-mitigations-enable
                            --pinned-heap-reg
                            --pinned-control-flow
-                           --spectre-callbacks-workaround
+                           --spectre-callbacks-workaround "true"
                            glue_lib_lucet.wasm
                            -o
                            ${GLUE_LIB_PATH}

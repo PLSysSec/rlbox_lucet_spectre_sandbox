@@ -12,38 +12,6 @@ pub struct LucetSandboxInstance {
     pub signatures: Vec<Signature>,
 }
 
-#[derive(Debug)]
-pub enum Error {
-    GoblinError(goblin::error::Error),
-    WasiError(failure::Error),
-    LucetRuntimeError(lucet_runtime_internals::error::Error),
-    LucetModuleError(lucet_module::Error),
-}
-
-impl From<goblin::error::Error> for Error {
-    fn from(e: goblin::error::Error) -> Self {
-        Error::GoblinError(e)
-    }
-}
-
-impl From<failure::Error> for Error {
-    fn from(e: failure::Error) -> Self {
-        Error::WasiError(e)
-    }
-}
-
-impl From<lucet_runtime_internals::error::Error> for Error {
-    fn from(e: lucet_runtime_internals::error::Error) -> Self {
-        Error::LucetRuntimeError(e)
-    }
-}
-
-impl From<lucet_module::Error> for Error {
-    fn from(e: lucet_module::Error) -> Self {
-        Error::LucetModuleError(e)
-    }
-}
-
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub enum LucetValueType {

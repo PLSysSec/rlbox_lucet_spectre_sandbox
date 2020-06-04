@@ -98,31 +98,7 @@ endif()
 add_subdirectory("${catch2_SOURCE_DIR}")
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/contrib")
 
-if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-  FetchContent_Declare(
-    wasiclang
-    URL
-      https://github.com/CraneStation/wasi-sdk/releases/download/wasi-sdk-6/wasi-sdk-6.0-macos.tar.gz
-    )
-else()
-  FetchContent_Declare(
-    wasiclang
-    URL
-      https://github.com/CraneStation/wasi-sdk/releases/download/wasi-sdk-6/wasi-sdk-6.0-linux.tar.gz
-    )
-endif()
-FetchContent_GetProperties(wasiclang)
-if(NOT wasiclang_POPULATED)
-  FetchContent_Populate(wasiclang)
-endif()
-
-FetchContent_Declare(
-  mod_lucet
-  GIT_REPOSITORY https://github.com/PLSysSec/lucet_sandbox_compiler)
-FetchContent_GetProperties(mod_lucet)
-if(NOT mod_lucet_POPULATED)
-  FetchContent_Populate(mod_lucet)
-endif()
+set (mod_lucet_SOURCE_DIR "${CMAKE_SOURCE_DIR}/../lucet-spectre/")
 
 # Rust Lib ###################
 
@@ -195,12 +171,10 @@ endif()
 include(CTest)
 include(Catch)
 
-find_program(WASMCLANG "clang")
-
-if(!WASMCLANG)
+if(NOT EXISTS "/opt/wasi-sdk/bin/clang")
   message(
     FATAL_ERROR
-      "Require clang with support for target 'wasm32-wasi' to build the WASM module"
+      "Require wasi clang with support for to build the WASM module. Install from here https://github.com/CraneStation/wasi-sdk/releases/"
     )
 endif()
 
@@ -212,7 +186,7 @@ add_custom_command(OUTPUT ${GLUE_LIB_WASM} ${GLUE_LIB_SO}
                    DEPENDS ${C_SOURCE_FILES}
                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/c_src
                    COMMAND rlbox_SOURCE_DIR=${rlbox_SOURCE_DIR}
-                           wasiclang_SOURCE_DIR=${wasiclang_SOURCE_DIR}
+                           wasiclang_SOURCE_DIR=""
                            LUCET_DIR=${LUCET_DIR}
                            LUCET_WASI_DIR=${mod_lucet_SOURCE_DIR}/lucet-wasi
                            ${CMAKE_COMMAND}

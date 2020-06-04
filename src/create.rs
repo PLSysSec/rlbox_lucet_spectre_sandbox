@@ -1,4 +1,6 @@
-use crate::types::{Error, LucetSandboxInstance};
+use crate::types::LucetSandboxInstance;
+
+use anyhow::Error;
 
 use lucet_runtime::{DlModule, Limits, MmapRegion, Module, Region};
 use lucet_runtime_internals::{module::ModuleInternal};
@@ -13,7 +15,7 @@ use std::sync::Arc;
 #[no_mangle]
 pub extern "C" fn lucet_ensure_linked() {
     lucet_runtime::lucet_internal_ensure_linked();
-    lucet_wasi::hostcalls::ensure_linked();
+    lucet_wasi::export_wasi_funcs();
 }
 
 #[no_mangle]
@@ -70,11 +72,12 @@ fn lucet_load_module_helper(module_path: &String, allow_stdio: bool) -> Result<L
     let sig = module.get_signatures().to_vec();
 
     // put the path to the module on the front for argv[0]
-    let mut builder = WasiCtxBuilder::new()
+    let mut builder_init = WasiCtxBuilder::new();
+    let mut builder = builder_init
         .args(&[&module_path]);
 
     if allow_stdio {
-        builder = builder.inherit_stdio_no_syscall();
+        builder = builder.inherit_stdio();
     }
 
     let ctx = builder.build()?;

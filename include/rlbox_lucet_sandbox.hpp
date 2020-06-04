@@ -653,15 +653,31 @@ protected:
     return lucet_lookup_function(sandbox, func_name);
   }
 
+  // Using inline assembly which manipulates registers can go wrong pretty easily
+  // For instance if the below function is inlined into a parent function, there
+  // can be writes to r15, r14 after the inline assembly before the call
+  // With the old register keyword, this was easier to control, but this is
+  // deprecated and not well supported
+  // Instead we use don't inline to reduce the odds that something goes wrong
+  template<typename T_Ret, typename T, typename... T_Args>
+  auto __attribute__ ((noinline)) invoke_with_fences(T* func_ptr, T_Args&&... params) {
+    // Function call entry - setup register pinning
+    asm volatile(
+    "mov %[heap_base], %%r15\n\t"
+    :                             // output
+    : [heap_base] "rm"(heap_base) // input
+    :  "%r15"                     // clobbered
+    );
+
+    return func_ptr(params...);
+  }
+
   template<typename T, typename T_Converted, typename... T_Args>
   auto impl_invoke_with_func_ptr(T_Converted* func_ptr, T_Args&&... params)
   {
 #ifdef RLBOX_EMBEDDER_PROVIDES_TLS_STATIC_VARIABLES
     auto& thread_data = *get_rlbox_lucet_sandbox_thread_data();
 #endif
-    thread_data.sandbox = this;
-    lucet_set_curr_instance(sandbox);
-
     // WASM functions are mangled in the following manner
     // 1. All primitive types are left as is and follow an LP32 machine model
     // (as opposed to the possibly 64-bit application)
@@ -738,12 +754,17 @@ protected:
       std::conditional_t<std::is_void_v<T_Ret>, uint32_t, T_Ret>;
     T_NoVoidRet ret;
 
+    thread_data.sandbox = this;
+    lucet_set_curr_instance(sandbox);
+
     if constexpr (std::is_void_v<T_Ret>) {
       RLBOX_LUCET_UNUSED(ret);
-      func_ptr_conv(heap_base, serialize_class_arg(params)...);
+      invoke_with_fences<T_Ret>(func_ptr_conv, heap_base, serialize_class_arg(params)...);
     } else {
-      ret = func_ptr_conv(heap_base, serialize_class_arg(params)...);
+      ret = invoke_with_fences<T_Ret>(func_ptr_conv, heap_base, serialize_class_arg(params)...);
     }
+
+    lucet_clear_curr_instance(sandbox);
 
     for (size_t i = 0; i < alloc_length; i++) {
       impl_free_in_sandbox(allocations_buff[i]);

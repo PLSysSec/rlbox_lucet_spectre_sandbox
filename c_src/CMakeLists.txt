@@ -61,6 +61,7 @@ add_custom_command(OUTPUT ${GLUE_LIB_PATH}
                            "4GiB"
                            --max-reserved-size
                            "4GiB"
+                           --spectre-mitigation sfi
                            glue_lib_lucet.wasm
                            -o
                            ${GLUE_LIB_PATH}
